@@ -1,0 +1,25 @@
+.duckButton {
+  position: relative;
+  width: min(56vw, 300px);
+  height: min(56vw, 300px);
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.duckButton:hover {
+  transform: translateY(-4px) scale(1.02);
+}
+
+.duckButton.pressed {
+  transform: scale(0.92, 1.06);
+}
+
+.duckSvg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.35));
+}
