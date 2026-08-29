@@ -2,6 +2,8 @@ import tkinter as tk
 import json
 import os
 import pygame
+import socket
+import threading
 
 RECORD_FILE = "record.json"
 SOUND_FILE = "creamy-keyboard-once.mp3"
@@ -131,6 +133,14 @@ class ClickerApp:
                               lambda e: self.canvas.config(cursor="hand2"))
         self.canvas.tag_bind("key_hit", "<Leave>",
                               lambda e: self.canvas.config(cursor="arrow"))
+
+        #Red
+        self.sock = None
+        self.connected = False
+        self.recv_thread = None
+        self.setup_connection_ui()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     # ---------------- Background & static chrome ----------------
 
@@ -291,7 +301,13 @@ class ClickerApp:
         if self.click_sound:
             self.click_sound.play()
 
-        self.clicks += 1
+        if self.connected:
+            self.send_command("INCREMENT")
+        else:
+            self.clicks += 1
+            self.update_click_displays()
+
+    def update_click_displays(self):
         self.canvas.itemconfig(self.txt_clicks, text=str(self.clicks))
         self.canvas.itemconfig("clicks_shadow", text=str(self.clicks))
 
@@ -299,6 +315,131 @@ class ClickerApp:
             self.record = self.clicks
             self.canvas.itemconfig(self.txt_record, text=str(self.record))
             self.save_record()
+
+    #Sockets
+
+    def setup_connection_ui(self):
+        self.conn_frame = tk.Frame(self.root, bg=BG_BOTTOM)
+        self.conn_frame.place(relx=0.5, y=HEIGHT - 50, anchor="center")
+
+        tk.Label(self.conn_frame, text="IP:", bg=BG_BOTTOM, fg=TEXT_MAIN, font=("Helvetica", 9, "bold")).pack(side="left")
+        self.ip_entry = tk.Entry(self.conn_frame, width=12)
+        self.ip_entry.insert(0, "127.0.0.1")
+        self.ip_entry.pack(side="left", padx=2)
+
+        tk.Label(self.conn_frame, text="Puerto:", bg=BG_BOTTOM, fg=TEXT_MAIN, font=("Helvetica", 9, "bold")).pack(side="left")
+        self.port_entry = tk.Entry(self.conn_frame, width=6)
+        self.port_entry.insert(0, "5050")
+        self.port_entry.pack(side="left", padx=2)
+
+        self.btn_connect = tk.Button(self.conn_frame, text="Conectar", command=self.toggle_connection, 
+                                     bg=ACCENT, fg="#ffffff", font=("Helvetica", 9, "bold"), relief=tk.FLAT, activebackground="#0e8c7f", activeforeground="#ffffff")
+        self.btn_connect.pack(side="left", padx=5)
+
+        self.status_label = tk.Label(self.root, text="Estado: Desconectado", bg=BG_BOTTOM, fg=TEXT_MUTED, font=("Helvetica", 9, "bold"))
+        self.status_label.place(relx=0.5, y=HEIGHT - 20, anchor="center")
+
+    def toggle_connection(self):
+        if not self.connected:
+            ip = self.ip_entry.get().strip()
+            port_str = self.port_entry.get().strip()
+            try:
+                port = int(port_str)
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(3.0) 
+                self.status_label.config(text=f"Conectando a {ip}:{port}...", fg=TEXT_MAIN)
+                self.root.update()
+                
+                self.sock.connect((ip, port))
+                self.sock.settimeout(None) 
+                self.connected = True
+                self.btn_connect.config(text="Desconectar", bg="#e06c75")
+                self.status_label.config(text=f"Conectado a {ip}:{port}", fg=PLATE_FILL)
+                self.ip_entry.config(state="disabled")
+                self.port_entry.config(state="disabled")
+                
+                self.recv_thread = threading.Thread(target=self.receive_loop, daemon=True)
+                self.recv_thread.start()
+                
+                self.send_command("GET")
+                self.poll_server()
+                
+            except Exception as e:
+                self.status_label.config(text=f"Error al conectar: {e}", fg="#d9534f")
+                if self.sock:
+                    self.sock.close()
+                    self.sock = None
+        else:
+            self.disconnect()
+
+    def disconnect(self):
+        self.connected = False
+        if self.sock:
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+                self.sock.close()
+            except:
+                pass
+            self.sock = None
+        
+        self.btn_connect.config(text="Conectar", bg=ACCENT)
+        self.ip_entry.config(state="normal")
+        self.port_entry.config(state="normal")
+        self.status_label.config(text="Estado: Desconectado", fg=TEXT_MUTED)
+
+    def send_command(self, cmd):
+        if self.connected and self.sock:
+            try:
+                msg = cmd + "\n"
+                self.sock.sendall(msg.encode("utf-8"))
+            except Exception as e:
+                self.root.after(0, self.handle_disconnect, f"Error al enviar: {e}")
+
+    def poll_server(self):
+        if self.connected:
+            self.send_command("GET")
+            self.root.after(500, self.poll_server)
+
+    def receive_loop(self):
+        buffer = b""
+        while self.connected:
+            try:
+                chunk = self.sock.recv(1024)
+                if not chunk:
+                    self.root.after(0, self.handle_disconnect, "Servidor cerró la conexión.")
+                    break
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, _, buffer = buffer.partition(b"\n")
+                    decoded = line.decode("utf-8", errors="ignore").strip()
+                    self.root.after(0, self.process_response, decoded)
+            except OSError as e:
+                if self.connected: 
+                    self.root.after(0, self.handle_disconnect, f"Error de red: {e}")
+                break
+            except Exception as e:
+                if self.connected:
+                    self.root.after(0, self.handle_disconnect, f"Error: {e}")
+                break
+
+    def handle_disconnect(self, msg=""):
+        self.status_label.config(text=msg, fg="#d9534f")
+        self.disconnect()
+
+    def process_response(self, response):
+        if response.startswith("OK "):
+            try:
+                val = int(response.split(" ")[1])
+                self.clicks = val
+                self.update_click_displays()
+            except ValueError:
+                pass
+        elif response.startswith("ERROR"):
+            self.status_label.config(text=f"Servidor: {response}", fg="#d9534f")
+
+    def on_closing(self):
+        self.disconnect()
+        self.root.destroy()
 
     # ---------------- Persistencia ----------------
 
