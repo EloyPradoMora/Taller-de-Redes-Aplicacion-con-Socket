@@ -66,3 +66,8 @@ Se abrirá una ventana gráfica (GUI) correspondiente al Mechanical Clicker.
 5. Haz clic en la "tecla" de la primera ventana. Verás y escucharás el clic, y el contador subirá a `1`.
 6. Sin que toques la segunda ventana, su contador también se actualizará automáticamente a `1` gracias a la sincronización en tiempo real.
 7. Al finalizar, simplemente cierra las ventanas y presiona `Ctrl+C` en la terminal del servidor para apagarlo de manera segura.
+
+
+
+# Presentacion:
+https://canva.link/pptxwa3nso1ef6y
